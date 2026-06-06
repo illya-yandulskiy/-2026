@@ -9,7 +9,10 @@ void KeyProcessor::processKey(int key) {
         case '3': currentMode = ProcessMode::GAUSSIAN_BLUR; break;
         case '4': currentMode = ProcessMode::CANNY_EDGES; break;
         case '5': currentMode = ProcessMode::SOBEL_FILTER; break;
-        default: break;
+        case 'f': 
+        case 'F': 
+            currentMode = ProcessMode::FACE_DETECT; 
+            break;
     }
 }
 
