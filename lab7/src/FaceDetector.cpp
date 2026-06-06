@@ -3,7 +3,13 @@
 #include <chrono>
 
 FaceDetector::FaceDetector(const std::string& prototxt, const std::string& model) {
-    net = cv::dnn::readNetFromCaffe(prototxt, model);
+    try {
+        net = cv::dnn::readNetFromCaffe(prototxt, model);
+        net.setPreferableBackend(cv::dnn::DNN_BACKEND_OPENCV);
+        net.setPreferableTarget(cv::dnn::DNN_TARGET_CPU);
+    } catch (const cv::Exception& e) {
+        std::cerr << "Error loading models: " << e.what() << std::endl;
+    }
     running = false;
     hasNewFrame = false;
 }
@@ -46,28 +52,34 @@ void FaceDetector::detectionLoop() {
             hasNewFrame = false;
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        if (frameToProcess.empty()) continue;
 
-        cv::Mat blob = cv::dnn::blobFromImage(frameToProcess, 1.0, cv::Size(300, 300), cv::Scalar(104.0, 177.0, 123.0));
-        net.setInput(blob);
-        cv::Mat detection = net.forward();
-        
-        cv::Mat detectionMat(detection.size[2], detection.size[3], CV_32F, detection.ptr<float>());
-        std::vector<cv::Rect> faces;
-        for (int i = 0; i < detectionMat.rows; i++) {
-            float conf = detectionMat.at<float>(i, 2);
-            if (conf > 0.5) {
-                faces.push_back(cv::Rect(
-                    detectionMat.at<float>(i, 3) * frameToProcess.cols,
-                    detectionMat.at<float>(i, 4) * frameToProcess.rows,
-                    (detectionMat.at<float>(i, 5) - detectionMat.at<float>(i, 3)) * frameToProcess.cols,
-                    (detectionMat.at<float>(i, 6) - detectionMat.at<float>(i, 4)) * frameToProcess.rows
-                ));
+        try {
+            cv::Mat blob = cv::dnn::blobFromImage(frameToProcess, 1.0, cv::Size(300, 300), cv::Scalar(104.0, 177.0, 123.0));
+            net.setInput(blob);
+            cv::Mat detection = net.forward();
+            
+            cv::Mat detectionMat(detection.size[2], detection.size[3], CV_32F, detection.ptr<float>());
+            std::vector<cv::Rect> faces;
+            
+            for (int i = 0; i < detectionMat.rows; i++) {
+                float conf = detectionMat.at<float>(i, 2);
+                if (conf > 0.5) { // Стандартний поріг
+                    int x1 = static_cast<int>(detectionMat.at<float>(i, 3) * frameToProcess.cols);
+                    int y1 = static_cast<int>(detectionMat.at<float>(i, 4) * frameToProcess.rows);
+                    int x2 = static_cast<int>(detectionMat.at<float>(i, 5) * frameToProcess.cols);
+                    int y2 = static_cast<int>(detectionMat.at<float>(i, 6) * frameToProcess.rows);
+                    faces.push_back(cv::Rect(cv::Point(x1, y1), cv::Point(x2, y2)));
+                }
             }
+            {
+                std::lock_guard<std::mutex> lock(mtx);
+                detectedFaces = faces;
+            }
+        } catch (const cv::Exception& e) {
+            std::cerr << "Face detection error: " << e.what() << std::endl;
         }
-        {
-            std::lock_guard<std::mutex> lock(mtx);
-            detectedFaces = faces;
-        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
     }
 }
